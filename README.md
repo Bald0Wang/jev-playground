@@ -15,6 +15,12 @@
 每个项目文件夹内有独立的 README、快速开始命令与 **EXPERIMENT.md 实验报告**（实验意义 / 说明的问题 / 实验过程展示 / 实验结果说明），配套可复现的 `experiment.py` 与数据产物。本地裁判（规则替身）让所有项目
 **无 API Key 即可跑通**；设 `TYPESAFE_API_KEY` 后同一套问题走真 Jev，代码零改动。
 
+## Jev 的请求与回复怎么设计的
+
+四个项目共用同一套调用结构（一次请求 = state + questions；回复 = 带概率的答案）。
+设计理由、三种回复原语、一次推理的完整九步路径，见
+[ARCHITECTURE.md](ARCHITECTURE.md)。
+
 ## 一分钟体验
 
 ```bash
