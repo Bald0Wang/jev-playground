@@ -122,19 +122,23 @@ def switch_episode(seed: int, holes: int, judge) -> dict:
 
 def run_switch_arm(holes_list, episodes: int) -> dict:
     out = {}
-    print('--- 换格对照臂（同一裁判：hidden single + 猜最小；猜错后换格）---')
+    print('--- 换格对照组（同一裁判：hidden single + 猜最小；猜错后换格）---')
     for holes in holes_list:
         results = [switch_episode(seed=1000 + holes * 10 + i, holes=holes,
                                   judge=local_judge) for i in range(episodes)]
         wins = sum(1 for r in results if r['outcome'] == 'win')
         mean_fill = sum(r['score'] for r in results) / len(results)
         mean_mist = sum(r['mistakes'] for r in results) / len(results)
-        out[f'{holes}_local_constraint + switch_cell'] = {
-            'holes': holes, 'judge': 'local_constraint + switch_cell', 'wins': wins,
+        out[f'{holes}_换格'] = {
+            'holes': holes, 'judge': '约束推理 + 换格', 'wins': wins,
             'mean_fill': round(mean_fill, 1), 'mean_mistakes': round(mean_mist, 2)}
-        print(f"{holes:>6} {'local_constraint + switch_cell':<34} {wins:>3}/{episodes} "
-              f"{mean_fill:>9.1f} {mean_mist:>13.2f}")
+        print(f"{holes:>6}  {disp('约束推理 + 换格')} {wins:>3}/{episodes} {mean_fill:>7.1f} {mean_mist:>9.2f}")
     return out
+
+
+def disp(name: str) -> str:
+    """Pad a (possibly Chinese) name to a fixed display width."""
+    return name + ' ' * max(0, 34 - sum(2 if ord(ch) > 127 else 1 for ch in name))
 
 
 def main() -> int:
@@ -145,14 +149,14 @@ def main() -> int:
     }
     report = {'holes_grid': list(HOLES), 'episodes_per_cell': EPISODES, 'cells': {}}
 
-    # judges: (name, judge_fn, trial_memory_flag)
+    # 四组对照：(名称, 裁判函数, 是否开试错记忆)
     arms = [
-        ("local_constraint", local_judge, False),
-        ("local_constraint + trial_memory", local_judge, True),
-        ('random_candidate', judges['random_candidate'], False),
-        ('random_candidate + trial_memory', judges['random_candidate'], True),
+        ("约束推理", local_judge, False),
+        ("约束推理 + 试错记忆", local_judge, True),
+        ('随机', judges['random_candidate'], False),
+        ('随机 + 试错记忆', judges['random_candidate'], True),
     ]
-    print(f"{'holes':>6} {'arm':<34} {'win':>5} {'mean fill':>10} {'mean mistakes':>14}")
+    print(f"{'空格':>6}  组别{'':<20} 胜     平均填对   平均失误")
     for holes in HOLES:
         for name, judge, memory in arms:
             results = [
@@ -163,11 +167,12 @@ def main() -> int:
             wins = sum(1 for r in results if r['outcome'] == 'win')
             mean_fill = sum(r['score'] for r in results) / len(results)
             mean_mist = sum(r['mistakes'] for r in results) / len(results)
-            report['cells'][f'{holes}_{name}'] = {
+            key = name.replace(' ', '_')
+            report['cells'][f'{holes}_{key}'] = {
                 'holes': holes, 'judge': name, 'wins': wins,
                 'mean_fill': round(mean_fill, 1), 'mean_mistakes': round(mean_mist, 2),
             }
-            print(f"{holes:>6} {name:<34} {wins:>3}/{EPISODES} {mean_fill:>9.1f} {mean_mist:>13.2f}")
+            print(f"{holes:>6}  {disp(name)} {wins:>3}/{EPISODES} {mean_fill:>7.1f} {mean_mist:>9.2f}")
 
     report['switch_arm'] = run_switch_arm(HOLES, EPISODES)
 
