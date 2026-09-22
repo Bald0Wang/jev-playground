@@ -82,6 +82,69 @@ python3 experiment.py
 
 ---
 
+## 附：这个实验里 Jev 的请求与回复结构
+
+### Jev 的角色
+
+每一轮回答一个问题：**从全部合法出牌里选一个**（领出时通常 40-60 个候选）。
+哪些牌合法、哪些能压过桌面、谁是队友，全是 harness 算的；模型只做选择。
+**另外两家的手牌它看不到**——请求里只有别家的剩余张数，和人类玩家一样。
+
+### 请求长什么样（真实采样）
+
+```json
+{
+  "state": "Dou Dizhu, seat 1 (peasant_a), landlord is seat 1. Your hand (17 cards): 3♠ 4♥ 5♦ … Table: landlord played 对子 5♠ 5♥. Multiplier x1. Rules: beat the table with the same type and a higher rank … As a peasant, your partner peasant is an ally — do not outbid their strong plays. …",
+  "model": "jev-latest",
+  "questions": {
+    "move": {
+      "type": "choice",
+      "instructions": "Choose the single best play. Lead by unloading large combinations first and saving singles; follow by beating with the smallest sufficient play. As a peasant, never outbid your partner peasant when their play is already strong (rank >= J) … Save bombs and the rocket for when the landlord is within two cards of winning …",
+      "criteria": {
+        "m0": "Pass this turn.",
+        "m1": "Play 对子 3♠ 3♦; leaves 18 cards in hand.",
+        "m2": "Play 对子 5♠ 5♥; leaves 18 cards in hand.",
+        "…": "共 56 个候选（本局实测），每个带「出完剩几张」"
+      }
+    }
+  }
+}
+```
+
+设计要点：**候选数量随局势膨胀**（56 个是本局实测值），所以 instructions 把
+策略写全（领出/跟牌/队友/炸弹四个维度），criterion 只带最关键的当场后果。
+gold 有两个层次：每个动作「是否压得过桌面」是确定性真值，参考策略推荐是
+策略性标签（报告里标注了 not a game-theoretic optimum）。
+
+### 回复结构（choice）
+
+```json
+{
+  "answers": {
+    "move": { "type": "choice", "choice": "m2", "confidence": 0.7,
+              "probabilities": { "m0": 0.1, "m1": 0.2, "m2": 0.7 } }
+  }
+}
+```
+
+`m2` 这种 id 映射回动作由 harness 做（`moves[i]`），模型只看到 id 与文字说明。
+
+### 一次推理的运行路径
+
+```
+① 轮到某座位（地主先出；两家 pass 后回到领出者）
+② gen_moves() 枚举该座位全部合法动作（领出=全部，跟牌=能压的+pass）
+③ render_request 组装：自己的牌、别家剩牌、桌面牌型、倍率 + 1 个 choice
+④ SDK → POST；取 answers['move'].choice 映射回动作
+⑤ step()：出牌则更新桌面/扣牌/炸弹翻倍；pass 则计数，两家 pass 清桌面
+⑥ 手牌空 → 该方胜；记录 history 与 multiplier
+```
+
+代码位置：`doudizhu_game.py` 的 `gen_moves` / `render_request` / `make_record` / `step`。
+
+
+---
+
 ## 附：Jev 扮演什么角色、花多少钱、要等多久
 
 ### Jev 在这个实验里干什么

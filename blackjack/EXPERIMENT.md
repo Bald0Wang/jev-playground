@@ -84,6 +84,70 @@ python3 experiment.py
 
 ---
 
+## 附：这个实验里 Jev 的请求与回复结构
+
+### Jev 的角色
+
+每一次要牌/停牌时回答一个问题：**hit / stand / double 选哪个**。harness 负责
+算好三件事：手牌点数（软/硬）、庄家明牌点数、**整副鞋的剩余组成**和**下一张
+爆牌概率**——模型不需要数牌，只需要对照策略表做判断。庄家暗牌它看不到。
+
+### 请求长什么样（真实采样，round 1）
+
+```json
+{
+  "state": "Blackjack round 1. Your hand: 8♦ 4♦ = 12. Dealer shows 9♣ (value 9). Shoe composition remaining: {\"10\": 4, \"2\": 4, …}. Probability the next card busts you: 38.3%. House rules: dealer stands on all 17s, blackjack pays 3:2, double on the first action only. …",
+  "model": "jev-latest",
+  "questions": {
+    "action": {
+      "type": "choice",
+      "instructions": "Choose the action with the best expected value against the dealer upcard … Basic strategy: stand on hard 17+; stand on hard 13-16 only vs dealer 2-6; …",
+      "criteria": {
+        "hit": "Take one card. Bust probability 38.3%; safe if the hand is soft.",
+        "stand": "Keep 12 and let the dealer play. Dealer must draw to all 17s.",
+        "double": "Double the bet, take exactly one more card, then stand."
+      }
+    }
+  }
+}
+```
+
+设计要点：**爆牌概率是 harness 算好直接给结论的**（38.3%），鞋组成以 JSON
+附上供模型自行推演；instructions 里把基本策略写成可执行的话（「hard 13-16
+只在庄家 2-6 时停牌」），criteria 里再带本手的数字。能 double 时 criterion
+可用，不能时标注 (Not available now)。
+
+### 回复结构（choice）
+
+```json
+{
+  "answers": {
+    "action": { "type": "choice", "choice": "hit", "confidence": 0.75,
+                "probabilities": { "hit": 0.75, "stand": 0.2, "double": 0.05 } }
+  }
+}
+```
+
+gold 就是基本策略表（`basic_strategy()`），模型分布 vs gold 的偏离按庄家明牌
+分桶统计，就是「偏离热力图」的数据源。
+
+### 一次推理的运行路径
+
+```
+① 发牌/进入玩家回合
+② 算手牌点数（软硬）、庄家明牌、鞋组成、爆牌概率
+③ render_request 组装 state + 1 个 choice 问题（3 个动作）
+④ SDK → POST；回复校验后取 answers['action'].choice
+⑤ step() 执行：hit 补牌（爆则直接结算）；double 加倍并只补一张；stand 交给庄家
+⑥ 庄家按规则补到 17+，结算本金与历史记录
+⑦ 回合结束自动发下一手；本金不足则 bankrupt
+```
+
+代码位置：`blackjack_game.py` 的 `render_request` / `basic_strategy` / `step`。
+
+
+---
+
 ## 附：Jev 扮演什么角色、花多少钱、要等多久
 
 ### Jev 在这个实验里干什么

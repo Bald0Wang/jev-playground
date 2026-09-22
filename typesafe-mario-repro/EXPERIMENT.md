@@ -90,6 +90,91 @@ World 1-1 第一根 4 格高的水管，**允许起跳的位置只有 28.6 像�
 
 ---
 
+## 附：这个实验里 Jev 的请求与回复结构
+
+### Jev 的角色
+
+每一拍（4-8 帧）回答**三个问题**（共享同一份 state，一次往返）：
+
+1. `next_action`（choice，7 个手柄宏）——下一步按什么；
+2. `jump_needed`（noul）——此刻前跳有没有用；
+3. `danger`（score，0-2）——处境多危险，供页面可视化。
+
+它**不执行任何动作**：选完由模拟器推进，下一步的事实重新解析再问。
+
+### 请求长什么样（真实采样，见 artifacts/sample_request.json）
+
+```json
+{
+  "state": {
+    "objective": "Reach the flag in World 1-1 without dying.",
+    "player": { "x": 172, "y": 79, "grounded": true, "jump_phase": "grounded", "horizontal_speed_px_per_frame": 0 },
+    "trajectory": { "airborne_frames": 0, "crossing_known_gap": false },
+    "hazard": { "enemy_ahead": true, "nearest_enemy_kind": "goomba", "nearest_enemy_distance_pixels": 42,
+                "jump_must_start_this_decision": false, "takeoff_deadline_frames": null },
+    "terrain": { "obstacle_distance_tiles": null, "gap_distance_tiles": 6, "observation_reliability": "high" },
+    "reaction_timing": { "action_horizon_frames": 8, "last_inference_delay_frames": 0 },
+    "recent_control": { "action": "right", "frames_observed": 1, "progress_gained_pixels": 0, "outcome": "not_enough_evidence" },
+    "episode": { "lives": 2, "time_left": 387, "progress": 172, "stalled_frames": 0 }
+  },
+  "model": "jev-latest",
+  "questions": {
+    "next_action": { "type": "choice", "instructions": "Which controller macro should Mario commit to next? …（8 组策略）",
+                     "criteria": { "noop": "Release the controls …", "right_run_jump": "Start a running jump when terrain or projected contact requires it …", "…": "共 7 个" } },
+    "jump_needed": { "type": "noul", "instructions": "Do trusted terrain, projected hazard, trajectory … indicate that a forward jump should begin or remain held now?" },
+    "danger": { "type": "score", "instructions": "How dangerous is Mario's immediate situation?",
+                "criteria": ["Safe open movement", "Potential obstacle or enemy soon", "Immediate collision, fall, or enemy threat"] }
+  }
+}
+```
+
+v2 harness 在此之上加两个键：`takeoff_window`（起跳窗口判定，jump_now/wait/
+too_late/regain_speed 四态）和 `prior_attempts`（跨局死亡蒸馏出的教训）。
+
+### 回复结构（真实采样，见 artifacts/sample_response.json）
+
+```json
+{
+  "model": "jev-latest",
+  "usage": { "input_tokens": 1932, "output_tokens": 12 },
+  "answers": {
+    "next_action": { "type": "choice", "choice": "right_run", "confidence": 0.88,
+                     "probabilities": { "noop": 0.02, "right": 0.02, "right_run": 0.88, "…": 0.14 } },
+    "jump_needed": { "type": "noul", "noul": 0.05 },
+    "danger": { "type": "score", "score": 0.0, "confidence": 0.85,
+                "legend": { "0": "Safe open movement", "1": "Potential obstacle or enemy soon", "2": "Immediate collision …" },
+                "probabilities": { "0": 0.9, "1": 0.08, "2": 0.02 } }
+  }
+}
+```
+
+（样例由本地替身按同一 schema 生成；真 API 的字段结构一致。）
+三种原语在这里同时出现，各司其职：choice 驱动动作，noul 上页面「前跳是否有
+利」条，score 上「即时危险度」条。
+
+### 一次推理的运行路径
+
+```
+① 模拟器推进 frames_per_decision 帧
+② _unwrap_ram() 从层层包装里取出 2KB RAM
+③ MarioStateParser 解析：敌人槽位、nametable 地形、位置/速度、上一回合结果
+   （parser_fix.py 在复现层修正相机页错位，见 REPORT §11）
+④ （v2）feasibility_features 算起跳窗口；AttemptMemory 蒸馏跨局教训
+⑤ policy.choose() 构造 Choice/Noul/Score 三个问题对象
+⑥ TypeSafeClient.system_one(state, questions) → POST /v1/systemone
+⑦ SDK 用 Pydantic wire model 校验；_answer() 从 choices/nouls/scores 取回
+⑧ Decision(action, confidence, probabilities, latency_ms, jump_needed, danger)
+⑨ runner 把 action 映射到 SIMPLE_MOVEMENT 索引；dashboard 路径按需插入
+   JUMP_RELEASE_ACTION 释放帧，然后 env.step() 推进
+```
+
+代码位置：上游 `typesafe_mario/policy.py`（choose/_answer）、
+`typesafe_mario/runner.py`（循环与释放帧）；复现层 `repro_run.py`
+（替身与客户端补丁）、`mario_harness_v2.py`（v2 harness）。
+
+
+---
+
 ## 附：Jev 扮演什么角色、花多少钱、要等多久
 
 ### Jev 在这个实验里干什么

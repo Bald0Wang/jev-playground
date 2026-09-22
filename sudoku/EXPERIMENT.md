@@ -89,6 +89,76 @@ python3 experiment.py
 
 ---
 
+## 附：这个实验里 Jev 的请求与回复结构
+
+### Jev 的角色
+
+每一步只回答一个问题：**这个格子填 1-9 哪个数字**。选格子（挑约束最多的）、
+整理棋盘和排除理由都是 harness 干的活。另配 9 个判断题（每个数字一个：
+「填这里是否与唯一解一致」）用于生成 gold 和做偏离对照，真跑时这些判断题
+可以和 choice 放在同一个请求里，一次往返全拿回。
+
+### 请求长什么样（真实采样，seed=7）
+
+```json
+{
+  "state": "Sudoku 9x9, zero-based (row,column). Dots are empty cells.\n3 5 1 2 7 6 . . 8   <- next cell (row 0, column 7)\n. . . 8 . . 3 5 .\n…",
+  "model": "jev-latest",
+  "questions": {
+    "digit": {
+      "type": "choice",
+      "instructions": "Write exactly one digit into the named cell. Use the published row/column/box exclusions first …",
+      "criteria": {
+        "1": "Write 1 at (row 0, column 7). IMPOSSIBLE: it already appears in row 0.",
+        "2": "Write 2 at (row 0, column 7). IMPOSSIBLE: it already appears in row 0.",
+        "4": "Write 4 at (row 0, column 7). survives all three row/column/box checks.",
+        "…": "共 9 个候选数字，每个带本格的排除理由"
+      }
+    },
+    "fits_4": {
+      "type": "boolean",
+      "instructions": "If the cell (row 0, column 7) is filled with 4, is that the digit the puzzle's unique solution places there?"
+    }
+  }
+}
+```
+
+设计要点：**排除理由写进 criterion**（「IMPOSSIBLE: it already appears in row 0」），
+模型不用自己扫行列宫；禁填的数字也作为选项保留并标明不可能——分布里能看到
+它对错误选项给了多少概率，这本身就是信息。
+
+### 回复结构（choice）
+
+```json
+{
+  "answers": {
+    "digit": { "type": "choice", "choice": "4", "confidence": 0.9,
+               "probabilities": { "1": 0.02, "4": 0.9, "…": 0.08 } },
+    "fits_4": { "type": "noul", "noul": 0.97 }
+  }
+}
+```
+
+`choice` 字段直接是答案；`probabilities` 画成概率条；9 个 `fits_N` 的 noul 值与
+gold（唯一解）逐位对照，就是偏离度量。
+
+### 一次推理的运行路径
+
+```
+① MRV 从当前棋盘挑出约束最多的空格
+② 算该格的行/列/宫已用数字，生成候选
+③ render_request 组装棋盘文本 + 10 个问题（1 choice + 9 boolean）
+④ SDK 序列化 → POST /v1/systemone
+⑤ 回复校验 → 取 answers['digit'].choice
+⑥ step()：对则填盘并 score+1，错则 mistakes+1（错误不入盘）
+⑦ 棋盘全满 → win；mistakes 到 3 → three_mistakes
+```
+
+代码位置：`sudoku_game.py` 的 `render_request` / `make_record` / `step`。
+
+
+---
+
 ## 附：Jev 扮演什么角色、花多少钱、要等多久
 
 ### Jev 在这个实验里干什么
