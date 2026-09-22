@@ -56,6 +56,11 @@ while not state['done']:
 print(state['bank'])   # 基本策略下的资金轨迹
 ```
 
+## 实验报告
+
+完整实验（意义 / 问题 / 过程 / 结果）见 [EXPERIMENT.md](EXPERIMENT.md)，
+可复现脚本 `experiment.py`，数据在 `artifacts/`。
+
 ## 文件
 
 - `blackjack_game.py` — 引擎：鞋、发牌、命中/停牌/加倍、庄家规则、结算、请求渲染、gold

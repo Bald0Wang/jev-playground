@@ -40,6 +40,11 @@ python3 jev_sudoku.py --episodes 10 --holes 55   # 只剩 2/10 胜率，平均�
 
 `artifacts/`：每局 JSONL（逐步的候选、回答、gold、对错）+ 汇总 JSON（胜率、平均得分、错误数）。
 
+## 实验报告
+
+完整实验（意义 / 问题 / 过程 / 结果）见 [EXPERIMENT.md](EXPERIMENT.md)，
+可复现脚本 `experiment.py`，数据在 `artifacts/`。
+
 ## 文件
 
 - `sudoku_game.py` — 引擎：生成/校验/step/请求渲染/gold（对齐 snake_game.py 的函数签名）

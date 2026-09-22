@@ -47,6 +47,11 @@ python3 serve_doudizhu.py --judge jev
 --no-browser       # 不自动开浏览器
 ```
 
+## 实验报告
+
+完整实验（意义 / 问题 / 过程 / 结果）见 [EXPERIMENT.md](EXPERIMENT.md)，
+可复现脚本 `experiment.py`，数据在 `artifacts/`。
+
 ## 文件
 
 - `doudizhu_game.py` — 引擎：发牌、牌型生成与压制、出牌推进、状态校验、请求渲染、gold

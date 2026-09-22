@@ -132,3 +132,8 @@ REPORT.md              完整研究报告（方法、全部数据、失败机制
 - 上游仓库未附 LICENSE 且声明不含任何 Nintendo ROM 或游戏数据；本项目使用的 ROM 来自 `gym-super-mario-bros` 包自带文件。
 - 上游仓库（`typesafe-mario/`）未改动一行；全部工作在本目录的脚手架层完成。
 - 完整方法、数据与过程中的错误更正见 [REPORT.md](REPORT.md)。
+
+## 实验报告
+
+结构化实验报告（意义 / 问题 / 过程 / 结果四段式）见 [EXPERIMENT.md](EXPERIMENT.md)；
+完整研究记录见 [REPORT.md](REPORT.md)。
