@@ -26,12 +26,17 @@ python3 jev_sudoku.py --judge jev --episodes 10
 - 填错记 mistake，3 错终局；填满即胜
 - 模型看到的棋盘**不含 solution 与种子**——与贪吃蛇省略 RNG 状态同一约定
 
-## 难度旋钮（本地裁判：naked/hidden single，绝不看 solution）
+## 难度旋钮与试错记忆（本地裁判：naked/hidden single，绝不看 solution）
 
 ```bash
-python3 jev_sudoku.py --episodes 10 --holes 40   # 10/10 全胜，0 错
-python3 jev_sudoku.py --episodes 10 --holes 55   # 只剩 2/10 胜率，平均填对 15.9/55
+python3 jev_sudoku.py --episodes 10 --holes 40                    # 10/10 全胜
+python3 jev_sudoku.py --episodes 10 --holes 55                    # 无记忆：2/10
+python3 jev_sudoku.py --episodes 10 --holes 55 --trial-memory     # 加试错记忆：5/10
 ```
+
+试错记忆：猜错的数字会被记住并在下一拍发布回请求（「此格已证错：1, 2」），
+裁判不再重复同一个错答案。对 50–55 空格提升显著（约束裁判 55 洞 0/10 → 5/10），
+机制与数据见 EXPERIMENT.md。
 
 40 洞的谜题在 MRV + 排除事实下必然产生 naked single；55 洞需要真正的搜索。
 这正是有意义的评测区间——换真 Jev 上来，同样的差距就是模型推理能力的度量。
