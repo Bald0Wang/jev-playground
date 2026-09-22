@@ -62,10 +62,14 @@ def local_judge(request: dict) -> dict:
             if all(digit not in _cands_for(request, r, c) for r, c in others):
                 return {'digit': str(digit)}
 
-    # naked single fallback: fewest-candidates cell heuristic is the harness's own
-    # choice of *this* cell; among survivors take the one that appears in the most
-    # constrained position elsewhere is beyond scope — take the lowest deterministically.
-    return {'digit': str(candidates[0])}
+    # Guess fallback: skip digits already tried and proven wrong at this cell.  The
+    # runner publishes `wrong_digits`; without this exclusion a deterministic judge
+    # repeats the same wrong answer until the mistake budget runs out (see EXPERIMENT).
+    tried = set(request.get('wrong_digits', {}).get(f'{row},{col}', []))
+    survivors = [c for c in candidates if c not in tried]
+    if not survivors:
+        survivors = candidates  # every candidate disproven — doomed either way
+    return {'digit': str(survivors[0])}
 
 
 def _unit_cells_of(row: int, col: int):
@@ -98,12 +102,27 @@ def jev_judge_factory(client):
 
 
 # --------------------------------------------------------------------- episode loop
-def run_episode(seed: int, holes: int, judge, split: str = 'dev'):
+def run_episode(seed: int, holes: int, judge, split: str = 'dev',
+                trial_memory: bool = False):
+    """One episode.  With ``trial_memory``, wrong guesses are remembered per cell and
+    published back into the next request (state text + ``wrong_digits``), so the judge
+    never repeats a disproven answer — the same information a human solver gets by
+    noticing a pencil mark failed."""
     state = S.make_sudoku(seed=seed, holes=holes)
     steps = []
+    wrong: dict[tuple[int, int], list[int]] = {}
     while not state['done']:
         request = S.render_request(state)
         request['_grid'] = [row[:] for row in state['grid']]  # public facts for the reader
+        if trial_memory:
+            request['wrong_digits'] = {f'{r},{c}': ds for (r, c), ds in wrong.items()}
+            here = wrong.get(tuple(request['cell']))
+            if here:
+                request['state'] += (
+                    '\nDigits already tried and proven wrong at this cell: '
+                    + ', '.join(str(d) for d in sorted(here))
+                    + '. Do not repeat them.'
+                )
         record = S.make_record(state, split)
         answer = judge(request)
         digit = int(answer['digit'])
@@ -117,6 +136,8 @@ def run_episode(seed: int, holes: int, judge, split: str = 'dev'):
             'correct': correct,
         })
         state = S.step(state, digit)
+        if trial_memory and not correct:
+            wrong.setdefault((row, col), []).append(digit)
     return {
         'seed': seed,
         'holes': holes,
@@ -133,6 +154,8 @@ def main() -> int:
     parser.add_argument('--episodes', type=int, default=10)
     parser.add_argument('--holes', type=int, default=40)
     parser.add_argument('--judge', choices=('local', 'jev'), default='local')
+    parser.add_argument('--trial-memory', action='store_true',
+                        help='remember wrong guesses per cell and publish them back')
     parser.add_argument('--first-seed', type=int, default=1)
     args = parser.parse_args()
 
@@ -162,7 +185,8 @@ def main() -> int:
     with log_path.open('w', encoding='utf-8') as log:
         for index in range(args.episodes):
             seed = args.first_seed + index
-            result = run_episode(seed, args.holes, judge)
+            result = run_episode(seed, args.holes, judge,
+                                 trial_memory=args.trial_memory)
             outcomes.append(result)
             log.write(json.dumps(result) + '\n')
             mark = 'WIN ' if result['outcome'] == 'win' else 'FAIL'

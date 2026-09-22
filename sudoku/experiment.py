@@ -32,12 +32,15 @@ EPISODES = 10
 
 
 def random_judge_factory():
-    """Uniform pick among published candidates; deterministic per episode."""
+    """Uniform pick among published candidates; deterministic overall."""
     rng = random.Random(20260922)
 
     def judge(request: dict) -> dict:
-        cands = request['candidates']
-        return {'digit': str(rng.choice(cands)) if cands else '1'}
+        cands = list(request['candidates'])
+        tried = set(request.get('wrong_digits', {}).get(
+            f"{request['cell'][0]},{request['cell'][1]}", []))
+        survivors = [c for c in cands if c not in tried] or cands
+        return {'digit': str(rng.choice(survivors)) if survivors else '1'}
 
     return judge
 
@@ -62,7 +65,10 @@ def local_judge(request: dict) -> dict:
                 digit not in S._candidates(request['_grid'], r, c) for r, c in others
             ):
                 return {'digit': str(digit)}
-    return {'digit': str(cands[0])}
+    # guess fallback: never repeat a digit already proven wrong at this cell
+    tried = set(request.get('wrong_digits', {}).get(f'{row},{col}', []))
+    survivors = [c for c in cands if c not in tried] or cands
+    return {'digit': str(survivors[0])}
 
 
 def main() -> int:
@@ -73,11 +79,19 @@ def main() -> int:
     }
     report = {'holes_grid': list(HOLES), 'episodes_per_cell': EPISODES, 'cells': {}}
 
-    print(f"{'holes':>6} {'judge':<18} {'win':>5} {'mean fill':>10} {'mean mistakes':>14}")
+    # judges: (name, judge_fn, trial_memory_flag)
+    arms = [
+        ("local_constraint", local_judge, False),
+        ("local_constraint + trial_memory", local_judge, True),
+        ('random_candidate', judges['random_candidate'], False),
+        ('random_candidate + trial_memory', judges['random_candidate'], True),
+    ]
+    print(f"{'holes':>6} {'arm':<34} {'win':>5} {'mean fill':>10} {'mean mistakes':>14}")
     for holes in HOLES:
-        for name, judge in judges.items():
+        for name, judge, memory in arms:
             results = [
-                run_episode(seed=1000 + holes * 10 + i, holes=holes, judge=judge)
+                run_episode(seed=1000 + holes * 10 + i, holes=holes, judge=judge,
+                            trial_memory=memory)
                 for i in range(EPISODES)
             ]
             wins = sum(1 for r in results if r['outcome'] == 'win')
@@ -87,7 +101,7 @@ def main() -> int:
                 'holes': holes, 'judge': name, 'wins': wins,
                 'mean_fill': round(mean_fill, 1), 'mean_mistakes': round(mean_mist, 2),
             }
-            print(f"{holes:>6} {name:<18} {wins:>3}/{EPISODES} {mean_fill:>9.1f} {mean_mist:>13.2f}")
+            print(f"{holes:>6} {name:<34} {wins:>3}/{EPISODES} {mean_fill:>9.1f} {mean_mist:>13.2f}")
 
     (ARTIFACTS / 'experiment_difficulty.json').write_text(
         json.dumps(report, indent=2, ensure_ascii=False))
