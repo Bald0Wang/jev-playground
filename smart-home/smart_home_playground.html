@@ -94,22 +94,24 @@
       <!-- Natural Language Command Bar (Text + Voice) -->
       <div class="p-3 border-b border-slate-800 bg-slate-900/70 backdrop-blur z-20">
         <div class="max-w-4xl mx-auto flex flex-col gap-2">
-          <div class="relative flex items-center">
-            <div class="absolute left-3.5 text-slate-400 pointer-events-none">
-              <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/>
-              </svg>
+          <div class="flex items-stretch gap-2">
+            <div class="relative flex-1 min-w-0">
+              <div class="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/>
+                </svg>
+              </div>
+              <input id="nlCommandInput" type="text" autocomplete="off"
+                placeholder="打字输入，或点右侧麦克风说话：'打开客厅的灯' / 'Get the coffee boiling'"
+                class="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm placeholder-slate-500 text-slate-100 outline-none transition font-sans">
             </div>
-            <input id="nlCommandInput" type="text" autocomplete="off"
-              placeholder="打字输入，或点右侧麦克风说话：'打开客厅的灯' / 'Get the coffee boiling'"
-              class="w-full pl-10 pr-[104px] py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm placeholder-slate-500 text-slate-100 outline-none transition font-sans">
             <button id="micBtn" title="点击开始/结束语音输入（阶跃星辰流式 ASR）"
-              class="absolute right-[84px] top-1.5 bottom-1.5 w-9 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 flex items-center justify-center transition">
+              class="shrink-0 w-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 flex items-center justify-center transition">
               <svg id="micIcon" class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v4m0 0H8m4 0h4M12 3a3 3 0 00-3 3v5a3 3 0 006 0V6a3 3 0 00-3-3z"/>
               </svg>
             </button>
-            <button id="sendNlBtn" class="absolute right-1.5 top-1.5 bottom-1.5 px-4 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium flex items-center gap-1.5 shadow-md transition">
+            <button id="sendNlBtn" class="shrink-0 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium flex items-center justify-center gap-1.5 shadow-md transition">
               <span>执行分析</span>
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
@@ -364,6 +366,7 @@ smartHome.executeCommand('打开客厅的灯');
           </div>
           <div id="compoundDetails" class="text-[11px] text-slate-400 font-sans mt-1">等待第一次指令…</div>
           <div id="compoundSubCommands" class="hidden mt-2 space-y-1.5"></div>
+          <div id="workflowPanel" class="hidden"></div>
         </div>
 
         <div class="bg-slate-950/80 rounded-xl p-3 border border-slate-800/80">
@@ -949,6 +952,95 @@ smartHome.executeCommand('打开客厅的灯');
     }
 
     /* =========================================================================
+       5a. 工作流编排 — 依赖分析（谁先谁后）+ 串行执行栈 / 并行
+       ========================================================================= */
+    // 编排专用问题包：每条子指令一个优先级 score + 每对子指令一个先后依赖 noul，仍是单次调用
+    function sequencingQuestions(subs) {
+      const q = {};
+      subs.forEach((s, idx) => {
+        q[`prio_${idx + 1}`] = {
+          type: 'score',
+          instructions: { sub_command: s, question: '这条子指令应该多早执行？' },
+          criteria: ['可以最后做，不着急', '随时都行', '必须最先做（安全相关，或是后续操作的前提）']
+        };
+      });
+      for (let i = 0; i < subs.length; i++) {
+        for (let j = i + 1; j < subs.length; j++) {
+          q[`before_${i + 1}_${j + 1}`] = {
+            type: 'noul',
+            instructions: {
+              sub_command_A: subs[i], sub_command_B: subs[j],
+              question: '子指令A必须在子指令B之前完成，B 才有意义或结果才正确吗？（同一设备动作相冲、或有因果前提=是；目标互不相关=否）'
+            }
+          };
+        }
+      }
+      return q;
+    }
+
+    // 依赖分析 → 执行计划：阈值以上算真依赖；无依赖=并行，有依赖=按拓扑序+优先级串行
+    function buildExecutionPlan(subs, answers) {
+      const TH = 0.6;
+      const deps = [];
+      for (let i = 0; i < subs.length; i++) {
+        for (let j = i + 1; j < subs.length; j++) {
+          const a = answers[`before_${i + 1}_${j + 1}`];
+          const p = a && a.type === 'noul' ? a.noul : 0;
+          if (p >= TH) deps.push({ i, j, p });
+        }
+      }
+      const prio = subs.map((_, idx) => {
+        const a = answers[`prio_${idx + 1}`];
+        return a && a.type === 'score' ? a.score : 0;
+      });
+      const order = [];
+      const remaining = new Set(subs.map((_, i) => i));
+      while (remaining.size) {
+        let pick = -1;
+        for (const i of remaining) {
+          const ready = deps.every(d => !(d.j === i && remaining.has(d.i)));
+          if (ready && (pick === -1 || prio[i] > prio[pick])) pick = i;
+        }
+        if (pick === -1) pick = [...remaining][0]; // 循环依赖兜底
+        order.push(pick);
+        remaining.delete(pick);
+      }
+      return { mode: deps.length ? 'serial' : 'parallel', deps, prio, order };
+    }
+
+    function renderWorkflow(plan, subs, statuses) {
+      const panel = document.getElementById('workflowPanel');
+      if (!plan || !plan.order || plan.order.length < 1) { panel.className = 'hidden'; return; }
+      panel.className = 'mt-2 pt-2 border-t border-slate-800';
+      const depRows = plan.deps.length
+        ? plan.deps.map(d => `
+            <div class="flex items-center justify-between text-[10px] font-mono">
+              <span class="text-amber-200">「${escapeHtml(subs[d.i])}」→「${escapeHtml(subs[d.j])}」</span>
+              <span class="text-amber-400">有依赖 ${(d.p * 100).toFixed(0)}%</span>
+            </div>`).join('')
+        : subs.length > 1
+          ? `<div class="text-[10px] text-slate-500">两两依赖概率均低于阈值 → 无先后关系</div>`
+          : '';
+      const icon = s => s === 'done' ? '✅' : s === 'running' ? '▶️' : '⏳';
+      const stackRows = plan.order.map((idx, pos) => {
+        const st = statuses ? statuses[idx] : 'pending';
+        return `
+          <div class="flex items-center justify-between text-[10px] font-mono ${st === 'running' ? 'text-cyan-300' : st === 'done' ? 'text-emerald-300' : 'text-slate-400'}">
+            <span>${icon(st)} 栈位${pos + 1} · 「${escapeHtml(subs[idx])}」</span>
+            <span class="text-[9px] text-slate-500">${st === 'running' ? '执行中' : st === 'done' ? '已完成' : '待执行'}</span>
+          </div>`;
+      }).join('');
+      panel.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[10px] font-sans font-semibold text-slate-300">执行编排（Jev 依赖分析 → 工作流）</span>
+          <span class="text-[9px] px-1.5 py-0.5 rounded ${plan.mode === 'serial' ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-300'}">
+            ${plan.mode === 'serial' ? '串行执行栈' : '并行执行'}</span>
+        </div>
+        ${depRows ? `<div class="space-y-0.5 mb-1.5">${depRows}</div>` : ''}
+        ${subs.length > 1 ? `<div class="space-y-0.5">${stackRows}</div>` : ''}`;
+    }
+
+    /* =========================================================================
        5. JEV 真实管线 — 单次投机提示调用 + 代码端分支
        ========================================================================= */
     const ROOMS = ['living_room', 'kitchen', 'office', 'bedroom', 'entrance'];
@@ -1023,12 +1115,16 @@ smartHome.executeCommand('打开客厅的灯');
       };
     }
 
-    async function jevSystemOne(utterance) {
+    async function jevSystemOne(utterance, stateObj, questions) {
       const t0 = performance.now();
       const res = await fetch('/api/jev', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: jevState(utterance), model: 'jev-latest', questions: jevQuestions() })
+        body: JSON.stringify({
+          state: stateObj || jevState(utterance),
+          model: 'jev-latest',
+          questions: questions || jevQuestions()
+        })
       });
       const wire = await res.json();
       const clientMs = Math.round(performance.now() - t0);
@@ -1185,7 +1281,7 @@ smartHome.executeCommand('打开客厅的灯');
           };
         }
 
-        // ── 路由 C：复合指令 → 大模型拆分 → 每个子指令并行再走一次 Jev ──
+        // ── 路由 C：复合指令 → LLM 拆分 → Jev 依赖分析（谁先谁后）→ 串行栈 / 并行执行 ──
         const compoundProb = Math.round((((answers.is_compound || {}).noul) || 0) * 1000) / 10;
         if (compoundProb >= 50) {
           const llm = await chatComplete(
@@ -1194,42 +1290,84 @@ smartHome.executeCommand('打开客厅的灯');
           const subs = llm.content.split('\n')
             .map(l => l.replace(/^[\s]*\d+[.、)]\s*/, '').trim())
             .filter(l => l.length > 0).slice(0, 4);
-          const subTraces = await Promise.all(subs.map(async (sub) => {
-            try {
-              const j = await jevSystemOne(sub);
-              return singleJevTrace(sub, j);
-            } catch (e) {
-              return { utterance: sub, error: String(e.message || e), speculativeBundle: [], dispatch: { dispatchedActions: {}, note: '子指令调用失败' } };
+
+          // 编排：再一次 Jev 调用，问「谁必须在谁之前」+「各自多早执行」，单次往返
+          const seq = await jevSystemOne(
+            commandText,
+            { utterance: commandText, sub_commands: subs, home: homeContext() },
+            sequencingQuestions(subs));
+          const plan = buildExecutionPlan(subs, seq.body.answers || {});
+
+          const statuses = {};
+          plan.order.forEach(i => statuses[i] = 'pending');
+          const subTraces = [];
+          const safeResolve = async (sub) => {
+            try { return singleJevTrace(sub, await jevSystemOne(sub)); }
+            catch (e) {
+              return { utterance: sub, error: String(e.message || e), speculativeBundle: [],
+                       dispatch: { dispatchedActions: {}, note: '子指令调用失败' } };
             }
-          }));
+          };
+          let execMs = 0;
+          if (plan.mode === 'parallel') {
+            plan.order.forEach(i => statuses[i] = 'running');
+            renderWorkflow(plan, subs, statuses);
+            const results = await Promise.all(plan.order.map(async idx => ({ idx, t: await safeResolve(subs[idx]) })));
+            results.forEach(r => { subTraces[r.idx] = r.t; statuses[r.idx] = 'done'; });
+            execMs = Math.max(...results.map(r => (r.t.clientMs || 0)));
+            renderWorkflow(plan, subs, statuses);
+          } else {
+            // 串行执行栈：按拓扑序逐个推栈执行，每个任务等前一个完成才派发
+            for (const idx of plan.order) {
+              statuses[idx] = 'running';
+              renderWorkflow(plan, subs, statuses);
+              const t = await safeResolve(subs[idx]);
+              subTraces[idx] = t;
+              for (const [k, v] of Object.entries((t.dispatch && t.dispatch.dispatchedActions) || {})) {
+                state.devices[k] = v;
+              }
+              syncDeviceStateTo3D();
+              execMs += (t.clientMs || 0);
+              statuses[idx] = 'done';
+              renderWorkflow(plan, subs, statuses);
+            }
+          }
+
           const merged = {};
-          subTraces.forEach(t => Object.assign(merged, t.dispatch ? t.dispatch.dispatchedActions : {}));
+          subTraces.forEach(t => t && Object.assign(merged, t.dispatch ? t.dispatch.dispatchedActions : {}));
           const mergedUsage = {
-            input_tokens: (s1.usage.input_tokens || 0) +
+            input_tokens: (s1.usage.input_tokens || 0) + (seq.body.usage.input_tokens || 0) +
               subTraces.reduce((a, t) => a + ((t.usage && t.usage.input_tokens) || 0), 0),
-            output_tokens: (s1.usage.output_tokens || 0) +
+            output_tokens: (s1.usage.output_tokens || 0) + (seq.body.usage.output_tokens || 0) +
               subTraces.reduce((a, t) => a + ((t.usage && t.usage.output_tokens) || 0), 0)
           };
           const splitCost = stepfunCostYuan(ENGINE.chatModel, llm.usage);
+          const modeNote = plan.mode === 'serial'
+            ? `检测到 ${plan.deps.length} 组先后依赖 → 串行栈执行（${plan.order.map(i => `#${i + 1}`).join('→')}）`
+            : '子指令两两无先后依赖 → 并行执行';
           return {
             type: 'compound', engine: 'real', command: commandText,
             latency: { total: Math.round(performance.now() - t0), stages: [
               { label: 'Jev 复合初筛', ms: s1.clientMs, color: 'bg-cyan-500' },
               { label: `LLM 拆分 (${ENGINE.chatModel})`, ms: llm.ms, color: 'bg-amber-500' },
-              { label: `并行 Jev ×${subs.length}`, ms: Math.max(...subTraces.map(t => t.clientMs || 0)), color: 'bg-emerald-500' }
+              { label: 'Jev 依赖编排分析', ms: seq.clientMs, color: 'bg-purple-500' },
+              { label: plan.mode === 'serial' ? `串行栈 Jev ×${plan.order.length}` : `并行 Jev ×${plan.order.length}`,
+                ms: execMs, color: 'bg-emerald-500' }
             ]},
             intent: s1.intent,
             compound: { isCompound: true, probability: compoundProb, splitModel: ENGINE.chatModel,
-                        subCommands: subTraces.map((t, i) => ({ id: i + 1, text: t.utterance, trace: t })) },
+                        subCommands: subTraces.map((t, i) => ({ id: i + 1, text: t ? t.utterance : subs[i], trace: t })) },
             speculativeBundle: s1.speculativeBundle,
+            workflow: { plan, subs, statuses },
             resolution: {
-              scope: 'compound_parallel', target: subTraces.map(t => t.dispatch && t.dispatch.target).filter(Boolean),
+              scope: plan.mode === 'serial' ? 'compound_serial_stack' : 'compound_parallel',
+              target: subTraces.map(t => t && t.dispatch && t.dispatch.target).filter(Boolean),
               dispatchedActions: merged,
-              subNotes: subTraces.map(t => `${t.utterance} → ${t.dispatch ? t.dispatch.note : '失败'}`)
+              subNotes: subTraces.map((t, i) => `${subs[i]} → ${t && t.dispatch ? t.dispatch.note : '失败'}`)
             },
             usage: mergedUsage,
             costYuan: jevCostYuan(mergedUsage) + splitCost,
-            note: `拆出 ${subs.length} 条子指令并行评估`
+            note: `拆出 ${subs.length} 条子指令；${modeNote}`
           };
         }
 
@@ -1262,7 +1400,9 @@ smartHome.executeCommand('打开客厅的灯');
  "commands": [{"utterance": "原子子指令", "scope": "whole_house|single_room|specific_device",
    "room": "living_room|kitchen|office|bedroom|entrance|not_room_specific",
    "category": "lighting|appliance|lock|fan|speaker|not_device_specific",
-   "action": "turn_on|turn_off|lock|unlock|leave_unchanged", "confidence": 0.0}]}
+   "action": "turn_on|turn_off|lock|unlock|leave_unchanged", "confidence": 0.0,
+   "depends_on": [0]}]}
+depends_on：必须先于本条执行的前置子指令下标数组（无依赖留空数组）。
 房间: living_room客厅 kitchen厨房 office书房 bedroom卧室 entrance玄关。
 设备: 各屋灯、客厅吊扇、客厅音响、厨房咖啡机、书房门锁、入户大门锁。
 复合指令（含多个独立操作）时把 commands 拆成多条；smart_home_query 时结合当前设备状态回答。
@@ -1319,6 +1459,25 @@ smartHome.executeCommand('打开客厅的灯');
         const intent = parsed.intent || 'smart_home_command';
         const conf = typeof parsed.intent_confidence === 'number' ? parsed.intent_confidence : 1;
         const cmds = Array.isArray(parsed.commands) ? parsed.commands : [];
+
+        // LLM 直接输出依赖关系（depends_on）→ 编排计划（与 Jev 版同一套执行语义）
+        const deps = [];
+        cmds.forEach((c, j) => (Array.isArray(c.depends_on) ? c.depends_on : []).forEach(i => {
+          if (Number.isInteger(i) && i >= 0 && i < cmds.length && i !== j) deps.push({ i, j, p: 1 });
+        }));
+        const order = [];
+        const remaining = new Set(cmds.map((_, i) => i));
+        while (remaining.size) {
+          let pick = -1;
+          for (const i of remaining) {
+            if (deps.every(d => !(d.j === i && remaining.has(d.i)))) { pick = i; break; }
+          }
+          if (pick === -1) pick = [...remaining][0];
+          order.push(pick);
+          remaining.delete(pick);
+        }
+        const plan = { mode: deps.length ? 'serial' : 'parallel', deps, prio: [], order };
+
         const bundle = [];
         const merged = {};
         const subs = [];
@@ -1357,7 +1516,10 @@ smartHome.executeCommand('打开客厅的灯');
             dispatchedActions: merged,
             note: `单次大模型调用包办${cmds.length > 1 ? '拆分+' : ''}意图+定位+动作`
           },
-          usage: llm.usage || {}, costYuan: stepfunCostYuan(ENGINE.compareModel, llm.usage), llmRaw: parsed
+          usage: llm.usage || {}, costYuan: stepfunCostYuan(ENGINE.compareModel, llm.usage),
+          workflow: { plan, subs: cmds.map(c => c.utterance || ''),
+                      statuses: Object.fromEntries(plan.order.map(i => [i, 'done'])) },
+          llmRaw: parsed
         };
         return trace;
       }
@@ -1624,6 +1786,10 @@ smartHome.executeCommand('打开客厅的灯');
         subContainer.className = 'hidden';
       }
 
+      // 执行编排面板：复合指令显示依赖分析与执行栈；其他类型隐藏
+      if (trace.workflow) renderWorkflow(trace.workflow.plan, trace.workflow.subs, trace.workflow.statuses);
+      else renderWorkflow(null);
+
       // 4. Speculative bundle（真实分布 + 剪枝标记）
       document.getElementById('speculativeList').innerHTML = (trace.speculativeBundle || []).map(item => {
         const top = Object.entries(item.distribution || {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
@@ -1829,7 +1995,8 @@ smartHome.executeCommand('打开客厅的灯');
             trace.resolution.answer, isLlm ? ENGINE.compareModel : 'smart_home_query');
         } else if (trace.type === 'compound') {
           const tgts = (trace.resolution.target || []).join('；');
-          showNotificationBanner('复合指令拆分执行完成', `已并行完成: ${tgts}。`, `${trace.compound.splitModel} · ${trace.latency.total}ms`);
+          const how = trace.resolution.scope === 'compound_serial_stack' ? '已按串行栈顺序完成' : '已并行完成';
+          showNotificationBanner('复合指令编排执行完成', `${how}: ${tgts}。`, `${trace.compound.splitModel} 拆分 · ${trace.latency.total}ms`);
         } else if (trace.type === 'single') {
           const note = trace.engine === 'sim' ? '（本地模拟）' : trace.engine === 'llm' ? '（传统 LLM 直答）' : '';
           showNotificationBanner(`指令执行成功: ${trace.resolution.target || '无目标'}${note}`,
@@ -1961,20 +2128,9 @@ smartHome.executeCommand('打开客厅的灯');
         });
       },
 
-      stop(cancel = false) {
-        if (!this.recording) return null;
-        this.cancelled = cancel;
-        this.recording = false;
-        clearTimeout(this._autoStop);
-        clearInterval(this.timerId);
-        if (this.processor) { try { this.processor.disconnect(); } catch (e) {} }
-        if (this.source) { try { this.source.disconnect(); } catch (e) {} }
-        if (this.stream) this.stream.getTracks().forEach(t => t.stop());
-        if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
-        document.getElementById('recHud').classList.add('opacity-0', 'pointer-events-none');
-        setMicUi(false);
-        if (cancel) return null;
-        // 合并 → 16bit PCM → base64
+      // 当前已积累音频的快照（base64 PCM）——滚动实时识别用
+      snapshotB64() {
+        if (this.totalSamples < 1) return null;
         const merged = new Int16Array(this.totalSamples);
         let off = 0;
         for (const c of this.chunks) { merged.set(c, off); off += c.length; }
@@ -1984,8 +2140,26 @@ smartHome.executeCommand('打开客厅的灯');
         for (let i = 0; i < bytes.length; i += CHUNK) {
           binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
         }
+        return btoa(binary);
+      },
+
+      stop(cancel = false) {
+        if (!this.recording) return null;
+        this.cancelled = cancel;
+        this.recording = false;
+        clearTimeout(this._autoStop);
+        clearInterval(this.timerId);
+        clearInterval(this.interimTimer);
+        if (this.processor) { try { this.processor.disconnect(); } catch (e) {} }
+        if (this.source) { try { this.source.disconnect(); } catch (e) {} }
+        if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+        if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
+        document.getElementById('recHud').classList.add('opacity-0', 'pointer-events-none');
+        setMicUi(false);
+        if (cancel) return null;
+        const audioB64 = this.snapshotB64();
         const durationMs = Math.round((this.totalSamples / 16000) * 1000);
-        return { audioB64: btoa(binary), durationMs };
+        return { audioB64, durationMs };
       }
     };
 
@@ -2070,6 +2244,7 @@ smartHome.executeCommand('打开客厅的灯');
     }
 
     let voiceBusy = false;
+    let voiceBusyInterim = false;
     async function toggleRecording() {
       if (voiceBusy) return;
       const micBtn = document.getElementById('micBtn');
@@ -2087,6 +2262,24 @@ smartHome.executeCommand('打开客厅的灯');
           await MicRecorder.start();
           setMicUi(true);
           playSound('beep');
+          // 滚动实时识别：每 ~0.6s 把已积累音频重识别一次，文字边说边长出来
+          MicRecorder.lastSentSamples = 0;
+          MicRecorder.interimTimer = setInterval(async () => {
+            if (voiceBusyInterim || !MicRecorder.recording) return;
+            if (MicRecorder.totalSamples - (MicRecorder.lastSentSamples || 0) < 16000) return; // 新增不足 1s
+            MicRecorder.lastSentSamples = MicRecorder.totalSamples;
+            voiceBusyInterim = true;
+            try {
+              const b64 = MicRecorder.snapshotB64();
+              if (b64) {
+                const { text } = await transcribeOnServer(b64);
+                if (MicRecorder.recording && text) {
+                  document.getElementById('nlCommandInput').value = text;
+                }
+              }
+            } catch (e) { /* 中途识别失败静默，停止后的最终识别兜底 */ }
+            voiceBusyInterim = false;
+          }, 600);
         } catch (e) {
           console.warn('mic start failed:', e);
           showNotificationBanner('无法访问麦克风', micErrorMessage(e), '权限错误');
