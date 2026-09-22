@@ -71,6 +71,72 @@ def local_judge(request: dict) -> dict:
     return {'digit': str(survivors[0])}
 
 
+# ------------------------------------------------------- switch-cell variant
+def make_avoiding_next_cell(avoid: set):
+    """MRV that skips cells already guessed wrong (until they collapse to a naked
+    single via correct fills elsewhere, at which point they are played for free)."""
+    def patched(state):
+        best = None
+        for r in range(9):
+            for c in range(9):
+                if state['grid'][r][c] == 0:
+                    cands = S._candidates(state['grid'], r, c)
+                    if (r, c) in avoid and len(cands) > 1:
+                        continue
+                    key = (len(cands), r, c)
+                    if best is None or key < (len(best[2]), best[0], best[1]):
+                        best = (r, c, cands)
+        return best
+    return patched
+
+
+def switch_episode(seed: int, holes: int, judge) -> dict:
+    """Trial-and-error by *moving*: after a wrong guess at a cell, park it and work
+    elsewhere; return when other fills reduce it to a forced play.  Solution-blind."""
+    avoid: set[tuple[int, int]] = set()
+    original = S.next_cell
+    S.next_cell = make_avoiding_next_cell(avoid)
+    try:
+        state = S.make_sudoku(seed=seed, holes=holes)
+        while not state['done']:
+            try:
+                request = S.render_request(state)
+            except Exception:
+                # only ambiguous parked cells remain and the mistake budget is intact:
+                # unsolvable within this episode's rules — count as a loss
+                state['done'], state['outcome'] = True, 'three_mistakes'
+                break
+            request['_grid'] = [row[:] for row in state['grid']]
+            answer = judge(request)
+            cell = tuple(request['cell'])
+            mistakes_before = state['mistakes']
+            state = S.step(state, int(answer['digit']))
+            if state['mistakes'] == mistakes_before + 1:
+                avoid.add(cell)  # this cell just cost a mistake — park it
+        return {'seed': seed, 'holes': holes, 'outcome': state['outcome'],
+                'score': state['score'], 'mistakes': state['mistakes'],
+                'steps': state['steps'], 'steps_detail': []}
+    finally:
+        S.next_cell = original
+
+
+def run_switch_arm(holes_list, episodes: int) -> dict:
+    out = {}
+    print('--- 换格对照臂（同一裁判：hidden single + 猜最小；猜错后换格）---')
+    for holes in holes_list:
+        results = [switch_episode(seed=1000 + holes * 10 + i, holes=holes,
+                                  judge=local_judge) for i in range(episodes)]
+        wins = sum(1 for r in results if r['outcome'] == 'win')
+        mean_fill = sum(r['score'] for r in results) / len(results)
+        mean_mist = sum(r['mistakes'] for r in results) / len(results)
+        out[f'{holes}_local_constraint + switch_cell'] = {
+            'holes': holes, 'judge': 'local_constraint + switch_cell', 'wins': wins,
+            'mean_fill': round(mean_fill, 1), 'mean_mistakes': round(mean_mist, 2)}
+        print(f"{holes:>6} {'local_constraint + switch_cell':<34} {wins:>3}/{episodes} "
+              f"{mean_fill:>9.1f} {mean_mist:>13.2f}")
+    return out
+
+
 def main() -> int:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     judges = {
@@ -102,6 +168,8 @@ def main() -> int:
                 'mean_fill': round(mean_fill, 1), 'mean_mistakes': round(mean_mist, 2),
             }
             print(f"{holes:>6} {name:<34} {wins:>3}/{EPISODES} {mean_fill:>9.1f} {mean_mist:>13.2f}")
+
+    report['switch_arm'] = run_switch_arm(HOLES, EPISODES)
 
     (ARTIFACTS / 'experiment_difficulty.json').write_text(
         json.dumps(report, indent=2, ensure_ascii=False))
