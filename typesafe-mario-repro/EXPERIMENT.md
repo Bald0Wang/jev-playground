@@ -78,6 +78,22 @@ World 1-1 第一根 4 格高的水管，**允许起跳的位置只有 28.6 像�
 把决定频率调到 4 帧一次，同一个策略最好成绩从 1124 变成 **3156**（2.8 倍）。
 **这是本次研究对上游最实用的一条建议。**
 
+![马里奥真机运行过程](images/terminal.png)
+
+*图：`../typesafe-mario/.venv/bin/python repro_real_env.py --decisions 150` 的实际
+运行输出——真 ROM 上两个策略各跑一局（ROM 路径、每局决策数、最远距离、动作分布
+落盘到 artifacts/real_env/）。环境准备：在上游 `typesafe-mario/` 目录执行
+`uv venv --python 3.13 .venv` + `pip install -e ".[mario,dev]"`。
+
+观战页面的样子（真实模拟器自动对局中截取）：
+
+![马里奥观战页面](images/viz.png)
+
+*图：`../typesafe-mario/.venv/bin/python viz_server.py` 启动后浏览器打开
+http://127.0.0.1:8770。左侧是真 NES 画面与已探明的关卡地图，右侧是模型看到的
+全部信息：三种回复原语各占一块（choice 概率条、noul 前跳判断、score 危险度），
+外加置信度、推理延迟与帧率控制。*
+
 ### D. 学 JevHarness 重写信息层（负结果）
 
 按 JevHarness 的三板斧重写了一遍信息层（`mario_harness_v2.py`）：把「能不能
