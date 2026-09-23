@@ -47,6 +47,8 @@ python3 experiment.py
 策略          存活轮数   最终本金   峰值本金   胜率   负率   爆牌率
 基本策略         298.5       87.0     236.5   18.9   33.4   16.4
 庄家模仿         144.9        2.0     152.0   16.8   24.7   31.9
+```
+
 
 ![21点实验运行过程](images/terminal.png)
 
@@ -60,7 +62,6 @@ python3 experiment.py
 *图：`python3 serve_blackjack.py` 启动后浏览器打开 http://127.0.0.1:8802。
 庄家暗牌背面朝上，右侧面板显示资金、每手输赢历史、发给模型的问题原文
 （含牌堆组成与爆牌概率）。*
-```
 
 观战服务实测（`serve_blackjack.py`）：决策面板里能看到完整的请求原文，包括
 牌堆组成 JSON 和爆牌概率（例如 "Your hand: 9♠ J♦ = 19 … Probability the next
