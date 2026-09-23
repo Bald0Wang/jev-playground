@@ -70,6 +70,12 @@ python3 experiment.py
    55 随机 + 试错记忆                       5/10      33.0          2.10
 ```
 
+![数独实验运行过程](images/terminal.png)
+
+*图：`python3 experiment.py` 的实际运行输出——四组对照（约束推理/随机 × 有无
+试错记忆）在 4 个难度下的完整成绩，以及换格对照组。启动方式：在 `sudoku/`
+目录执行 `python3 experiment.py`（纯标准库，无需安装任何东西）。*
+
 ## 5. Jev 每一步怎么工作
 
 ### 角色
